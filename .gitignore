@@ -1,0 +1,8 @@
+.python311/
+.tools/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+stock_agent.db
+.env
