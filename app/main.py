@@ -1,19 +1,28 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from app.database import init_db
+from app.kakao_auth import kakao_settings
 from app.routes import router
 from app.settings import load_environment
 
+logging.basicConfig(level=logging.INFO)
 
 load_environment()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     init_db()
+    token = kakao_settings()["access_token"]
+    if token:
+        logger.info("Kakao alerts enabled (access token loaded)")
+    else:
+        logger.warning("Kakao alerts disabled: KAKAO_ACCESS_TOKEN missing in .env")
     yield
 
 
