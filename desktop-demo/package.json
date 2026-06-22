@@ -1,0 +1,17 @@
+{
+  "name": "stock-agent-electron-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Disconnected Electron UI demo for Stock Agent",
+  "main": "main.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check main.js && node --check preload.js && node --check src/renderer.js"
+  },
+  "devDependencies": {
+    "electron": "42.4.1"
+  }
+}
