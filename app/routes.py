@@ -15,9 +15,10 @@ from app.kakao_auth import (
 )
 from app.market_data import MarketDataError
 from app.repositories import WatchlistRepository
-from app.schemas import AnalysisResultRead, WatchlistCreate, WatchlistItemRead
+from app.schemas import AnalysisResultHistoryItem, AnalysisResultRead, WatchlistCreate, WatchlistItemRead
 from app.kakao_notify import KakaoNotifyError
-from app.services import AnalysisProvider, get_analysis_service
+from app.scheduler import run_scheduled_batch
+from app.services import AnalysisProvider, ScheduledBatchResult, get_analysis_service
 
 
 router = APIRouter()
@@ -115,6 +116,30 @@ def delete_watchlist_item(symbol: str, db: Session = Depends(get_db)):
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/scheduler/run", response_model=ScheduledBatchResult)
+def run_scheduler(
+    force: bool = Query(default=False, description="Skip market-hours check"),
+    db: Session = Depends(get_db),
+):
+    try:
+        return run_scheduled_batch(db, ignore_market_hours=force)
+    except KakaoNotifyError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@router.get("/stocks/{symbol}/analysis", response_model=list[AnalysisResultHistoryItem])
+def list_analysis_history(
+    symbol: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    analysis_service: AnalysisProvider = Depends(get_analysis_service),
+):
+    try:
+        return analysis_service.list_analysis_history(symbol, limit=limit, offset=offset)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.get("/stocks/{symbol}/analysis/latest", response_model=AnalysisResultRead)
 def get_latest_analysis(
     symbol: str,
@@ -131,3 +156,17 @@ def get_latest_analysis(
     except KakaoNotifyError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return result
+
+
+@router.get("/stocks/{symbol}/analysis/{result_id}", response_model=AnalysisResultRead)
+def get_analysis_by_id(
+    symbol: str,
+    result_id: int,
+    analysis_service: AnalysisProvider = Depends(get_analysis_service),
+):
+    try:
+        return analysis_service.get_analysis_by_id(symbol, result_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
