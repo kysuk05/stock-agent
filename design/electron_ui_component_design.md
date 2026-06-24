@@ -2,127 +2,176 @@
 
 ## 1. 목적
 
-Stock Agent의 핵심 사용자 흐름을 데스크톱 화면으로 검증하기 위한 Electron 데모를 정의한다. 이 단계에서는 FastAPI, SQLite, Gemini, yfinance, 카카오 API와 연결하지 않고 고정된 mock 데이터와 화면 상태만 사용한다.
+Stock Agent의 현재 구현 기능을 데스크톱 화면에서 확인하기 위한 Electron 데모를 정의한다. 이 단계의 목표는 새 투자 기능을 제안하는 것이 아니라, 이미 구현된 FastAPI 기능을 연결했을 때 사용자가 어떤 흐름으로 사용할지 검증하는 것이다.
 
-## 2. 화면 원칙
+데모 앱은 아직 FastAPI, SQLite, Gemini, yfinance, 카카오 API와 연결하지 않는다. 대신 고정된 mock 데이터로 `관심종목 -> 최신 분석 -> 분석 이력 -> 알림 상태` 흐름만 표현한다.
 
-- 한 화면에서 관심종목, 최신 분석, 분석 이력을 함께 확인한다.
-- 투자 판단을 대신하지 않는 분석 보조 도구임을 명확하게 표시한다.
-- 종목 상태는 색상뿐 아니라 텍스트 배지로도 구분한다.
-- 실제 연동 전 단계이므로 `DEMO DATA`와 마지막 갱신 시각을 항상 표시한다.
-- 1280 x 800 데스크톱을 기준으로 하되 920px 이하에서는 1열로 재배치한다.
+## 2. Electron 선택 이유
 
-## 3. 정보 구조
+Electron은 이번 단계에서 새 백엔드를 만들지 않고도 데스크톱 앱 사용성을 빠르게 검증할 수 있다는 점이 가장 크다. Stock Agent는 이미 FastAPI 중심으로 API 경계가 잡혀 있으므로, Electron 화면은 향후 `fetch` 호출만 연결해도 현재 API와 자연스럽게 붙일 수 있다.
+
+또한 HTML, CSS, JavaScript를 그대로 사용하므로 기존 웹 화면과 UI 설계 자산을 재사용하기 쉽다. 패키징 단계에서는 Windows/macOS/Linux 데스크톱 배포를 같은 코드베이스에서 검토할 수 있고, Electron의 main process, preload, renderer 구조를 이용해 화면 코드와 로컬 앱 권한을 분리할 수 있다.
+
+민감 정보는 Electron 앱에 직접 보관하지 않는 것을 원칙으로 한다. Gemini API 키, 카카오 토큰, DB 접근은 FastAPI 백엔드가 담당하고, Electron은 사용자가 보는 화면과 백엔드 API 호출만 맡는다.
+
+## 3. 기능 범위 정리
+
+### 현재 구현 기능 기준
+
+| 기능 | 백엔드 구현 기준 | 데모 화면 표현 |
+| --- | --- | --- |
+| 관심종목 목록 | `GET /watchlist` | 좌측 관심종목 목록 |
+| 관심종목 추가 | `POST /watchlist` | 종목 코드 입력 후 mock 항목 추가 |
+| 관심종목 삭제 | `DELETE /watchlist/{symbol}` | 후속 화면 범위로 문서에만 표시 |
+| 최신 분석 조회 | `GET /stocks/{symbol}/analysis/latest` | 선택 종목의 최신 분석 카드 |
+| 분석 이력 조회 | `GET /stocks/{symbol}/analysis` | 하단 이력 테이블 |
+| 분석 상세 조회 | `GET /stocks/{symbol}/analysis/{id}` | 이력 클릭 시 분석 카드 교체 |
+| 수동 분석 실행 | `POST /scheduler/run?force=true` | 상단 `수동 분석 실행` 버튼 |
+| 카카오 알림 상태 | 분석 결과의 `should_alert`, `alert_reason`, `alert_sent_at` | 상태 스트립의 알림 카드 |
+
+### 이번 데모에서 의도적으로 제외
+
+- 전체 포트폴리오 수익률, 투자금, 보유 수량
+- 실시간 차트, 캔들 차트, 주문/매매 기능
+- 다중 페이지 설정 화면
+- 실제 로그인, 토큰 저장, 알림 발송
+
+## 4. 화면 원칙
+
+- 한 화면 안에서 현재 구현된 API 흐름을 따라간다.
+- 종목 선택은 관심종목 목록에서 시작한다.
+- 최신 분석과 과거 이력은 같은 상세 카드에 표시해 비교 부담을 줄인다.
+- 알림은 별도 기능처럼 과장하지 않고 분석 결과에 포함된 상태로 보여준다.
+- `MOCK MODE`와 연결 예정 API명을 화면에 노출해 데모 범위를 명확히 한다.
+
+## 5. 정보 구조
 
 | 영역 | 역할 | 주요 내용 |
 | --- | --- | --- |
-| App Shell | 전체 레이아웃 | 사이드바, 상단바, 콘텐츠 영역 |
-| Watchlist | 분석 대상 선택 | 종목 목록, 등락률, 종목 추가 |
-| Market Summary | 선택 종목 요약 | 현재가, 등락, 거래량, 갱신 상태 |
-| Analysis Hero | 최신 AI 분석 | 종합 판단, 요약, 신뢰 안내 |
-| Insight Grid | 근거와 위험 | 핵심 근거, 위험 요인, 주요 지표 |
-| History Panel | 과거 분석 비교 | 분석 시점 목록, 선택 시 상세 교체 |
-| Demo Notice | 비연동 상태 고지 | mock 데이터 및 API 미연결 안내 |
+| 좌측 흐름 안내 | 데모 진행 순서 안내 | 관심종목 선택, 최신 분석 확인, 이력 비교, 알림 상태 확인 |
+| 상단 조작 영역 | 전역 조작 | 종목 검색, 수동 분석 실행 |
+| 관심종목 영역 | 분석 대상 선택 | 종목 코드, 종목명, 알림 상태, 종목 추가 입력 |
+| 현재 상태 요약 | 현재 상태 확인 | 선택 종목, 스케줄러 실행 상태, 데이터 기준 시각, 알림 상태 |
+| 분석 상세 영역 | 최신/선택 이력 상세 | 판단, 요약, 현재가, 등락률, 참고 안내 |
+| 분석 근거 영역 | 분석 근거 확인 | 핵심 근거, 위험 요인 |
+| 주요 지표 영역 | 분석 입력 지표 확인 | 거래량 비율, 20일 저점, 20일 고점, 알림 조건 수 |
+| 분석 이력 영역 | 저장된 분석 결과 확인 | 결과 ID, 분석 시각, 판단, 요약 |
 
-## 4. UI 컴포넌트 다이어그램
+## 6. UI 컴포넌트 다이어그램
 
 ```mermaid
 flowchart TB
-    APP["Electron App"] --> MAIN["Main Process"]
-    MAIN --> WIN["BrowserWindow"]
-    MAIN --> PRELOAD["Preload / 안전한 브리지"]
-    WIN --> SHELL["AppShell"]
+    SCREEN["관심종목 분석 데모 화면"] --> SIDE["좌측 흐름 안내"]
+    SCREEN --> MAINVIEW["주요 작업 영역"]
 
-    SHELL --> SIDEBAR["Sidebar"]
-    SHELL --> TOPBAR["TopBar"]
-    SHELL --> DASH["DashboardPage"]
+    SIDE --> BRAND["서비스명 표시"]
+    SIDE --> FLOW["데모 진행 단계"]
+    SIDE --> NOTICE["MOCK MODE 안내"]
 
-    SIDEBAR --> BRAND["Brand"]
-    SIDEBAR --> NAV["PrimaryNav"]
-    SIDEBAR --> STATUS["DemoStatus"]
+    MAINVIEW --> TOP["상단 조작 영역"]
+    MAINVIEW --> GRID["분석 화면 배치"]
 
-    TOPBAR --> TITLE["PageTitle"]
-    TOPBAR --> SEARCH["SymbolSearch"]
-    TOPBAR --> REFRESH["RefreshButton"]
+    TOP --> SEARCH["관심종목 검색"]
+    TOP --> RUN["수동 분석 실행"]
 
-    DASH --> WATCH["WatchlistPanel"]
-    DASH --> CONTENT["AnalysisWorkspace"]
+    GRID --> WATCH["관심종목 영역"]
+    GRID --> WORK["분석 결과 영역"]
 
-    WATCH --> WATCHROW["WatchlistItem × N"]
-    WATCH --> ADD["AddSymbolForm"]
+    WATCH --> WATCH_ITEMS["관심종목 행 x N"]
+    WATCH --> ADD["관심종목 추가"]
 
-    CONTENT --> MARKET["MarketSummaryCard"]
-    CONTENT --> HERO["AnalysisHeroCard"]
-    CONTENT --> GRID["InsightGrid"]
-    CONTENT --> HISTORY["AnalysisHistoryPanel"]
+    WORK --> STATUS["현재 상태 요약"]
+    WORK --> ANALYSIS["분석 상세 영역"]
+    WORK --> INSIGHT["분석 근거 영역"]
+    WORK --> METRICS["주요 지표 영역"]
+    WORK --> HISTORY["분석 이력 영역"]
 
-    GRID --> REASONS["ReasonList"]
-    GRID --> RISKS["RiskList"]
-    GRID --> METRICS["MetricCards"]
-    HISTORY --> HISTORYROW["HistoryItem × N"]
-    HISTORY --> DETAIL["SelectedAnalysisDetail"]
+    STATUS --> SELECTED["선택 종목"]
+    STATUS --> SCHEDULER["스케줄러 실행 상태"]
+    STATUS --> DATA_TIME["데이터 기준 시각"]
+    STATUS --> ALERT["카카오 알림 상태"]
 
-    STORE["MockStore"] --> WATCH
-    STORE --> MARKET
-    STORE --> HERO
-    STORE --> GRID
-    STORE --> HISTORY
+    ANALYSIS --> VERDICT["종합 판단 배지"]
+    ANALYSIS --> SUMMARY["분석 요약"]
+    ANALYSIS --> PRICE["현재가와 등락률"]
+
+    INSIGHT --> REASONS["핵심 근거"]
+    INSIGHT --> RISKS["위험 요인"]
+
+    HISTORY --> HISTORY_ROW["분석 이력 행 x N"]
+    HISTORY --> LATEST["최신 분석 보기"]
 ```
 
-## 5. 컴포넌트 책임
+## 7. 주요 컴포넌트 책임
 
 | 컴포넌트 | 입력 | 사용자 동작 | 상태 변화 |
 | --- | --- | --- | --- |
-| `SymbolSearch` | 종목 코드 또는 이름 | 검색 제출 | mock 목록에서 종목 선택 |
-| `WatchlistItem` | 종목, 현재가, 등락률 | 행 클릭 | 전체 분석 영역 갱신 |
-| `AddSymbolForm` | 사용자 입력 | 추가 버튼 | 데모 종목을 관심목록에 추가 |
-| `RefreshButton` | 현재 선택 종목 | 새로고침 | 갱신 시각 변경, 토스트 표시 |
-| `AnalysisHeroCard` | 판단, 요약, 분석 시각 | 없음 | 선택된 이력에 따라 내용 교체 |
-| `HistoryItem` | 과거 분석 요약 | 이력 클릭 | 해당 시점 상세 표시 |
-| `PrimaryNav` | 메뉴 목록 | 메뉴 클릭 | 데모에서는 대시보드만 활성화, 나머지는 안내 토스트 |
+| 관심종목 검색 | 종목 코드 또는 이름 | Enter 제출 | mock 관심종목에서 일치 항목 선택 |
+| 수동 분석 실행 버튼 | 현재 선택 종목 | 클릭 | 스케줄러 상태를 `실행 중 -> 완료`로 변경 |
+| 관심종목 행 | 종목 코드, 종목명, 알림 상태 | 클릭 | 최신 분석과 이력 목록 교체 |
+| 관심종목 추가 입력 | 종목 코드 | 제출 | mock 관심종목 추가 후 선택 |
+| 현재 상태 요약 | 선택 종목, 스케줄러, 데이터 시각, 알림 상태 | 없음 | 선택 종목/수동 실행 결과에 따라 갱신 |
+| 분석 상세 카드 | `AnalysisResultRead` 형태의 mock 데이터 | 없음 | 최신 또는 선택 이력 상세 표시 |
+| 분석 근거 카드 | `key_reasons`, `risk_factors` | 없음 | 선택 분석 결과에 따라 목록 교체 |
+| 주요 지표 카드 | `MarketIndicators`, 알림 조건 | 없음 | 선택 종목 기준 지표 표시 |
+| 분석 이력 목록 | `AnalysisResultHistoryItem[]` | 이력 행 클릭 | 상세 카드가 해당 결과로 교체 |
 
-## 6. 화면 상태
+## 8. 화면 상태
 
 ```mermaid
 stateDiagram-v2
-    [*] --> DashboardReady
-    DashboardReady --> SymbolChanged: 관심종목 선택
-    SymbolChanged --> DashboardReady: mock 데이터 렌더링
-    DashboardReady --> HistorySelected: 분석 이력 선택
-    HistorySelected --> DashboardReady: 최신 분석 선택
-    DashboardReady --> SymbolAdded: 종목 추가
-    SymbolAdded --> DashboardReady: 관심목록 갱신
-    DashboardReady --> Refreshed: 새로고침
-    Refreshed --> DashboardReady: 갱신 시각 표시
+    [*] --> 화면_준비됨
+    화면_준비됨 --> 종목_변경됨: 관심종목 클릭 또는 검색
+    종목_변경됨 --> 화면_준비됨: 최신 분석 mock 렌더링
+
+    화면_준비됨 --> 분석_실행중: 수동 분석 실행 클릭
+    분석_실행중 --> 화면_준비됨: 스케줄러 상태 완료
+
+    화면_준비됨 --> 이력_선택됨: 이력 행 클릭
+    이력_선택됨 --> 화면_준비됨: 최신 분석 보기 클릭
+
+    화면_준비됨 --> 종목_추가됨: 종목 코드 추가
+    종목_추가됨 --> 화면_준비됨: mock 관심종목 갱신
 ```
 
-## 7. 비연동 범위
+## 9. 상세 화면 설계
 
-### 데모에서 동작
+```text
++--------------------------------------------------------------------------------+
+| 상단 조작 영역                                                                 |
+| 관심종목 분석 데모                                                             |
+| 관심종목 분석 데모        [종목 검색 input] [수동 분석 실행]                  |
++----------------------+---------------------------------------------------------+
+| 좌측 흐름 안내      | 주요 작업 영역                                          |
+| - 1 관심종목 선택    | +-----------------------------------------------------+ |
+| - 2 최신 분석 확인   | | 현재 상태 요약                                      | |
+| - 3 이력 비교        | | 선택 종목 | 스케줄러 | 데이터 기준 | 알림          | |
+| - 4 알림 상태 확인   | +-----------------------------------------------------+ |
+|                      | +-----------------------------------------------------+ |
+| MOCK MODE 안내       | | 분석 상세 카드                                      | |
+|                      | | [판단 배지] 종목명(코드)       현재가/등락률        | |
+| 관심종목 영역        | | 요약 문장                                            | |
+| - 종목 행            | +-----------------------------------------------------+ |
+| - 종목 행            | +--------------------------+ +------------------------+ |
+| - 종목 추가 input    | | 핵심 근거                | | 위험 요인              | |
+|                      | +--------------------------+ +------------------------+ |
+|                      | +-----------------------------------------------------+ |
+|                      | | 주요 지표: 거래량, 20일 저점/고점, 알림 조건        | |
+|                      | +-----------------------------------------------------+ |
+|                      | +-----------------------------------------------------+ |
+|                      | | 분석 이력: ID, 분석 시각, 판단, 요약                | |
+|                      | +-----------------------------------------------------+ |
++----------------------+---------------------------------------------------------+
+```
 
-- 관심종목 선택 및 mock 분석 교체
-- 종목 검색
-- 데모 종목 추가
-- 분석 이력 선택
-- 새로고침 시각 및 토스트 표시
-- 반응형 레이아웃
+## 10. 향후 실제 API 연결 지점
 
-### 데모에서 동작하지 않음
-
-- 실제 주가 조회와 차트 데이터 갱신
-- Gemini 분석 요청
-- 관심종목 DB 저장
-- 카카오 로그인 및 알림 발송
-- 백그라운드 스케줄러 실행
-
-## 8. 향후 연결 지점
-
-| UI 동작 | 연결 예정 API |
-| --- | --- |
-| 관심종목 조회 | `GET /watchlist` |
-| 관심종목 추가 | `POST /watchlist` |
-| 관심종목 삭제 | `DELETE /watchlist/{symbol}` |
-| 최신 분석 조회 | `GET /stocks/{symbol}/analysis/latest` |
-| 분석 이력 조회 | `GET /stocks/{symbol}/analysis` |
-| 분석 상세 조회 | `GET /stocks/{symbol}/analysis/{id}` |
-| 수동 분석 실행 | `POST /scheduler/run?force=true` |
+| UI 동작 | 연결 예정 API | 화면 반영 |
+| --- | --- | --- |
+| 앱 시작 | `GET /watchlist` | 좌측 관심종목 목록 초기화 |
+| 종목 추가 | `POST /watchlist` | 성공 시 목록 재조회 또는 optimistic append |
+| 종목 선택 | `GET /stocks/{symbol}/analysis/latest` | 상세 카드 렌더링 |
+| 종목 선택 | `GET /stocks/{symbol}/analysis?limit=20` | 이력 테이블 렌더링 |
+| 이력 클릭 | `GET /stocks/{symbol}/analysis/{id}` | 상세 카드 교체 |
+| 수동 분석 실행 | `POST /scheduler/run?force=true` | 완료 후 최신 분석/이력 재조회 |
+| 알림 표시 | 분석 응답의 `should_alert`, `alert_reason`, `alert_sent_at` | 알림 상태 카드 갱신 |
